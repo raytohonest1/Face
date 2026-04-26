@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh api *)",
+      "Bash(where gh *)",
+      "Bash(winget list *)",
+      "PowerShell(Get-StoredCredential *)",
+      "PowerShell(cmdkey *)",
+      "Bash(git credential *)"
+    ]
+  }
+}
