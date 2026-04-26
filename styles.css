@@ -931,15 +931,6 @@ button:disabled {
 
 .gauge-fill {
   stroke: var(--brand-purple);
-  transition: stroke-dasharray 120ms ease;
-}
-
-.gauge-fill-left {
-  stroke-dasharray: var(--left-progress) 100;
-}
-
-.gauge-fill-right {
-  stroke-dasharray: var(--right-progress) 100;
 }
 
 .face-viewfinder {

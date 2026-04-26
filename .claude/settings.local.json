@@ -6,7 +6,9 @@
       "Bash(winget list *)",
       "PowerShell(Get-StoredCredential *)",
       "PowerShell(cmdkey *)",
-      "Bash(git credential *)"
+      "Bash(git credential *)",
+      "Bash(gh auth *)",
+      "PowerShell(gh auth *)"
     ]
   }
 }

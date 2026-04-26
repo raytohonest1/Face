@@ -69,6 +69,39 @@ const state = {
 const isCameraView = (view) => view === "idScan" || view === "faceScan";
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
+const computeArcPath = (progress, side) => {
+  if (progress <= 0.005) return "";
+  const cx = 161, cy = 161, r = 146;
+  const angle = (progress * Math.PI) / 2; // 0 → π/2
+  const f = (v) => v.toFixed(2);
+
+  if (side === "right") {
+    // 위(12시)에서 시계방향 → 3시
+    const x1s = cx + r * Math.cos(-Math.PI / 2);
+    const y1s = cy + r * Math.sin(-Math.PI / 2);
+    const x1e = cx + r * Math.cos(-Math.PI / 2 + angle);
+    const y1e = cy + r * Math.sin(-Math.PI / 2 + angle);
+    // 아래(6시)에서 반시계방향 → 3시
+    const x2s = cx + r * Math.cos(Math.PI / 2);
+    const y2s = cy + r * Math.sin(Math.PI / 2);
+    const x2e = cx + r * Math.cos(Math.PI / 2 - angle);
+    const y2e = cy + r * Math.sin(Math.PI / 2 - angle);
+    return `M ${f(x1s)} ${f(y1s)} A ${r} ${r} 0 0 1 ${f(x1e)} ${f(y1e)} M ${f(x2s)} ${f(y2s)} A ${r} ${r} 0 0 0 ${f(x2e)} ${f(y2e)}`;
+  }
+
+  // 위(12시)에서 반시계방향 → 9시
+  const x1s = cx + r * Math.cos(-Math.PI / 2);
+  const y1s = cy + r * Math.sin(-Math.PI / 2);
+  const x1e = cx + r * Math.cos(-Math.PI / 2 - angle);
+  const y1e = cy + r * Math.sin(-Math.PI / 2 - angle);
+  // 아래(6시)에서 시계방향 → 9시
+  const x2s = cx + r * Math.cos(Math.PI / 2);
+  const y2s = cy + r * Math.sin(Math.PI / 2);
+  const x2e = cx + r * Math.cos(Math.PI / 2 + angle);
+  const y2e = cy + r * Math.sin(Math.PI / 2 + angle);
+  return `M ${f(x1s)} ${f(y1s)} A ${r} ${r} 0 0 0 ${f(x1e)} ${f(y1e)} M ${f(x2s)} ${f(y2s)} A ${r} ${r} 0 0 1 ${f(x2e)} ${f(y2e)}`;
+};
+
 const renderStatusBar = (dark = false) => `
   <div class="status-bar${dark ? " dark" : ""}" aria-hidden="true">
     <span class="status-time">9:41</span>
@@ -256,12 +289,12 @@ const renderFaceScan = () => {
         ${renderHeader({ backAction: "face-guide", camera: true })}
         <div class="face-camera-body">
           <div class="face-gauge-wrap">
-            <div id="faceGauge" class="face-gauge" style="--left-progress: 0; --right-progress: 0">
+            <div id="faceGauge" class="face-gauge">
               <svg class="gauge-svg" viewBox="0 0 322 322" aria-hidden="true">
                 <path class="gauge-track" d="M 161 15 A 146 146 0 0 0 161 307" pathLength="100" />
                 <path class="gauge-track" d="M 161 15 A 146 146 0 0 1 161 307" pathLength="100" />
-                <path class="gauge-fill gauge-fill-left" d="M 161 15 A 146 146 0 0 0 161 307" pathLength="100" />
-                <path class="gauge-fill gauge-fill-right" d="M 161 15 A 146 146 0 0 1 161 307" pathLength="100" />
+                <path class="gauge-fill gauge-fill-left" d="" />
+                <path class="gauge-fill gauge-fill-right" d="" />
               </svg>
               <div class="face-viewfinder" aria-hidden="true"></div>
             </div>
@@ -740,17 +773,20 @@ const getGaugeProgress = (step, yawDegrees, stepProgress) => {
 };
 
 const updateFaceUi = (progress, statusText, direction, step = FACE_STEPS[state.faceStepIndex]) => {
-  const gauge = document.querySelector("#faceGauge");
   const prompt = document.querySelector("#facePrompt");
   const status = document.querySelector("#faceStatus");
   const leftArrow = document.querySelector("#leftArrow");
   const rightArrow = document.querySelector("#rightArrow");
+  const gaugeFillLeft = document.querySelector(".gauge-fill-left");
+  const gaugeFillRight = document.querySelector(".gauge-fill-right");
   const gaugeProgress =
     typeof progress === "number" ? { left: progress, right: progress } : { left: 0, right: 0, ...progress };
 
-  if (gauge) {
-    gauge.style.setProperty("--left-progress", String(Math.round(clamp(gaugeProgress.left, 0, 1) * 100)));
-    gauge.style.setProperty("--right-progress", String(Math.round(clamp(gaugeProgress.right, 0, 1) * 100)));
+  if (gaugeFillLeft) {
+    gaugeFillLeft.setAttribute("d", computeArcPath(clamp(gaugeProgress.left, 0, 1), "left"));
+  }
+  if (gaugeFillRight) {
+    gaugeFillRight.setAttribute("d", computeArcPath(clamp(gaugeProgress.right, 0, 1), "right"));
   }
 
   if (prompt) {
