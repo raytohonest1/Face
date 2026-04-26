@@ -230,7 +230,7 @@ button:disabled {
 .app-header {
   position: absolute;
   z-index: 18;
-  top: 47px;
+  top: 0;
   left: 0;
   right: 0;
   display: grid;
@@ -293,7 +293,7 @@ button:disabled {
 
 .body {
   position: absolute;
-  top: 103px;
+  top: 56px;
   left: 0;
   right: 0;
   bottom: 90px;
@@ -374,7 +374,7 @@ button:disabled {
 
 .start-body {
   position: absolute;
-  top: 47px;
+  top: 0;
   bottom: 90px;
   left: 0;
   right: 0;
@@ -704,7 +704,7 @@ button:disabled {
 .camera-dim {
   position: absolute;
   z-index: 4;
-  inset: 103px 0 122px;
+  inset: 56px 0 122px;
   background: rgba(0, 0, 0, 0.62);
   pointer-events: none;
 }
@@ -712,7 +712,7 @@ button:disabled {
 .id-window {
   position: absolute;
   z-index: 6;
-  top: 265px;
+  top: 218px;
   left: 30px;
   width: 330px;
   height: 220px;
@@ -767,7 +767,7 @@ button:disabled {
 .camera-instruction {
   position: absolute;
   z-index: 8;
-  top: 529px;
+  top: 482px;
   left: 0;
   right: 0;
   margin: 0;
@@ -873,7 +873,7 @@ button:disabled {
 .face-camera-body {
   position: absolute;
   z-index: 8;
-  top: 103px;
+  top: 56px;
   left: 0;
   right: 0;
   height: 522px;
@@ -995,7 +995,7 @@ button:disabled {
 .face-status {
   position: absolute;
   z-index: 10;
-  top: 608px;
+  top: 561px;
   left: 24px;
   right: 24px;
   min-height: 24px;
@@ -1011,7 +1011,7 @@ button:disabled {
   display: grid;
   height: 100%;
   place-items: center;
-  padding: 103px 24px 124px;
+  padding: 56px 24px 124px;
   text-align: center;
 }
 
@@ -1123,14 +1123,14 @@ button:disabled {
   }
 
   .id-window {
-    top: 244px;
+    top: 197px;
     left: 24px;
     width: calc(100% - 48px);
     height: min(220px, 56vw);
   }
 
   .camera-instruction {
-    top: calc(244px + min(220px, 56vw) + 38px);
+    top: calc(197px + min(220px, 56vw) + 38px);
   }
 
   .face-camera-body {

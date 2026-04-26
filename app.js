@@ -142,7 +142,6 @@ const renderLoading = () => `
 const renderStart = () => `
   <section class="phone dark">
     <div class="screen dark">
-      ${renderStatusBar(false)}
       <div class="start-body">
         <div class="brand-lockup">
           <div class="kiwoom-logo" aria-label="KIWOOM">KIWOOM</div>
@@ -161,7 +160,6 @@ const renderStart = () => `
 const renderIdGuide = () => `
   <section class="phone">
     <div class="screen">
-      ${renderStatusBar(false)}
       ${renderHeader({ title: "신분증 본인인증", backAction: "home" })}
       <div class="body guide-layout face-guide-body">
         <div class="title-block">
@@ -216,7 +214,6 @@ const renderIdScan = () => `
 const renderIdConfirm = () => `
   <section class="phone">
     <div class="screen">
-      ${renderStatusBar(false)}
       ${renderHeader({ title: "신분증 본인인증", backAction: "id-scan" })}
       <div class="body guide-layout">
         <div class="title-block">
@@ -243,7 +240,6 @@ const renderIdConfirm = () => `
 const renderFaceGuide = () => `
   <section class="phone">
     <div class="screen">
-      ${renderStatusBar(false)}
       ${renderHeader({ title: "얼굴 본인인증", backAction: "id-confirm" })}
       <div class="body guide-layout">
         <div class="title-block">
@@ -285,7 +281,6 @@ const renderFaceScan = () => {
     <section class="phone">
       <div class="screen camera-screen">
         <video id="camera" class="live-video mirror" autoplay muted playsinline></video>
-        ${renderStatusBar(true)}
         ${renderHeader({ backAction: "face-guide", camera: true })}
         <div class="face-camera-body">
           <div class="face-gauge-wrap">
@@ -314,7 +309,6 @@ const renderFaceScan = () => {
 const renderSuccess = () => `
   <section class="phone">
     <div class="screen">
-      ${renderStatusBar(false)}
       ${renderHeader({ title: "본인인증 완료" })}
       <div class="success-layout">
         <div>
