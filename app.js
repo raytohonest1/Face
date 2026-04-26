@@ -5,6 +5,43 @@ const MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
 const DETECTION_INTERVAL_MS = 90;
 const RAD_TO_DEG = 180 / Math.PI;
+const QUALITY_HOLD_MS = 900;
+const LIVENESS_STEP_TIMEOUT_MS = 5500;
+const LIVENESS_SESSION_TIMEOUT_MS = 18000;
+const FACE_LOST_FAIL_MS = 800;
+const TURN_YAW_DEGREES = 18;
+const NEUTRAL_YAW_DEGREES = 8;
+const BLINK_CLOSED_SCORE = 0.48;
+const BLINK_OPEN_SCORE = 0.26;
+const MOUTH_OPEN_SCORE = 0.45;
+const MOUTH_CLOSED_SCORE = 0.24;
+
+const CHALLENGE_LIBRARY = {
+  turnLeft: {
+    shortLabel: "왼쪽",
+    title: "고개 왼쪽",
+    actionText: "고개를 왼쪽으로 돌리세요.",
+    neutralText: "정면으로 돌아오세요.",
+  },
+  turnRight: {
+    shortLabel: "오른쪽",
+    title: "고개 오른쪽",
+    actionText: "고개를 오른쪽으로 돌리세요.",
+    neutralText: "정면으로 돌아오세요.",
+  },
+  blink: {
+    shortLabel: "깜빡임",
+    title: "눈 깜빡임",
+    actionText: "양쪽 눈을 한 번 깜빡이세요.",
+    neutralText: "눈을 다시 떠주세요.",
+  },
+  mouthOpen: {
+    shortLabel: "입벌림",
+    title: "입 벌림",
+    actionText: "입을 크게 벌리세요.",
+    neutralText: "입을 다시 닫아주세요.",
+  },
+};
 
 const FACE_OVAL = [
   10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378,
@@ -48,6 +85,29 @@ const faceCount = document.querySelector("#faceCount");
 const yawAngle = document.querySelector("#yawAngle");
 const yawDirection = document.querySelector("#yawDirection");
 const fps = document.querySelector("#fps");
+const livenessPanel = document.querySelector("#livenessPanel");
+const livenessLabel = document.querySelector("#livenessLabel");
+const livenessTimer = document.querySelector("#livenessTimer");
+const livenessTitle = document.querySelector("#livenessTitle");
+const livenessInstruction = document.querySelector("#livenessInstruction");
+const livenessProgress = document.querySelector("#livenessProgress");
+const livenessSteps = document.querySelector("#livenessSteps");
+const retryLivenessButton = document.querySelector("#retryLivenessButton");
+
+const createLivenessState = () => ({
+  state: "idle",
+  sequence: [],
+  stepIndex: 0,
+  stepPhase: "action",
+  startedAt: 0,
+  stepStartedAt: 0,
+  holdStartedAt: 0,
+  qualityStartedAt: 0,
+  faceLostSince: 0,
+  progress: 0,
+  message: "카메라를 시작하세요.",
+  lastSignals: null,
+});
 
 let landmarker = null;
 let stream = null;
@@ -58,6 +118,7 @@ let frameCounter = 0;
 let fpsStartedAt = performance.now();
 let isRunning = false;
 let smoothedYawDegrees = null;
+let livenessState = createLivenessState();
 
 const setStatus = (text, state = "idle") => {
   statusBadge.textContent = text;
@@ -71,6 +132,116 @@ const setBusy = (busy) => {
 const setMessage = (text, visible = true) => {
   message.textContent = text;
   emptyState.hidden = !visible;
+};
+
+const setLivenessMessage = (text) => {
+  livenessState.message = text;
+};
+
+const shuffle = (items) => {
+  const nextItems = [...items];
+
+  for (let index = nextItems.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [nextItems[index], nextItems[swapIndex]] = [nextItems[swapIndex], nextItems[index]];
+  }
+
+  return nextItems;
+};
+
+const createChallengeSequence = () => {
+  const turn = Math.random() > 0.5 ? "turnLeft" : "turnRight";
+  return shuffle([turn, "blink", "mouthOpen"]);
+};
+
+const getCurrentChallenge = () => livenessState.sequence[livenessState.stepIndex] ?? null;
+
+const getLivenessProgress = () => {
+  if (livenessState.state === "quality") {
+    return livenessState.progress;
+  }
+
+  if (livenessState.state === "passed") {
+    return 1;
+  }
+
+  if (livenessState.state === "failed") {
+    return livenessState.progress;
+  }
+
+  if (livenessState.state !== "challenge" || !livenessState.sequence.length) {
+    return 0;
+  }
+
+  const phaseOffset = livenessState.stepPhase === "neutral" ? 0.65 : 0.25;
+  return clamp((livenessState.stepIndex + phaseOffset) / livenessState.sequence.length, 0, 1);
+};
+
+const renderLiveness = () => {
+  if (!livenessPanel) {
+    return;
+  }
+
+  const currentChallenge = getCurrentChallenge();
+  livenessPanel.hidden = livenessState.state === "idle";
+  livenessPanel.dataset.state = livenessState.state;
+  livenessProgress.style.width = `${Math.round(getLivenessProgress() * 100)}%`;
+  retryLivenessButton.hidden = !["failed", "passed"].includes(livenessState.state);
+
+  if (livenessState.state === "quality") {
+    livenessLabel.textContent = "Ready";
+    livenessTimer.textContent = "준비";
+    livenessTitle.textContent = "얼굴 확인 중";
+  } else if (livenessState.state === "challenge") {
+    const elapsed = performance.now() - livenessState.stepStartedAt;
+    const remainingSeconds = Math.max(0, Math.ceil((LIVENESS_STEP_TIMEOUT_MS - elapsed) / 1000));
+    livenessLabel.textContent = `Step ${livenessState.stepIndex + 1}/${livenessState.sequence.length}`;
+    livenessTimer.textContent = `${remainingSeconds}s`;
+    livenessTitle.textContent = currentChallenge ? CHALLENGE_LIBRARY[currentChallenge].title : "동작 확인";
+  } else if (livenessState.state === "passed") {
+    livenessLabel.textContent = "Passed";
+    livenessTimer.textContent = "완료";
+    livenessTitle.textContent = "라이브니스 통과";
+  } else if (livenessState.state === "failed") {
+    livenessLabel.textContent = "Failed";
+    livenessTimer.textContent = "실패";
+    livenessTitle.textContent = "라이브니스 실패";
+  } else {
+    livenessLabel.textContent = "Live Check";
+    livenessTimer.textContent = "--";
+    livenessTitle.textContent = "라이브니스 체크";
+  }
+
+  livenessInstruction.textContent = livenessState.message;
+  livenessSteps.innerHTML = livenessState.sequence
+    .map((step, index) => {
+      const state =
+        index < livenessState.stepIndex
+          ? "done"
+          : index === livenessState.stepIndex && livenessState.state === "challenge"
+            ? "active"
+            : "pending";
+
+      return `<span class="liveness-step" data-state="${state}">${CHALLENGE_LIBRARY[step].shortLabel}</span>`;
+    })
+    .join("");
+};
+
+const resetLiveness = () => {
+  livenessState = createLivenessState();
+  renderLiveness();
+};
+
+const startLivenessCheck = () => {
+  livenessState = {
+    ...createLivenessState(),
+    state: "quality",
+    sequence: createChallengeSequence(),
+    startedAt: performance.now(),
+    message: "얼굴을 중앙에 맞추고 정면을 봐주세요.",
+  };
+  setStatus("체크", "warn");
+  renderLiveness();
 };
 
 const updateToggle = () => {
@@ -117,11 +288,11 @@ const loadLandmarker = async () => {
         delegate,
       },
       runningMode: "VIDEO",
-      numFaces: 1,
+      numFaces: 2,
       minFaceDetectionConfidence: 0.55,
       minFacePresenceConfidence: 0.55,
       minTrackingConfidence: 0.55,
-      outputFaceBlendshapes: false,
+      outputFaceBlendshapes: true,
       outputFacialTransformationMatrixes: true,
     });
 
@@ -343,6 +514,364 @@ const getPrimaryFaceIndex = (faces) => {
   return primaryIndex;
 };
 
+const getNormalizedBounds = (landmarks) => {
+  const validPoints = landmarks.filter(isValidPoint);
+
+  if (!validPoints.length) {
+    return null;
+  }
+
+  const xs = validPoints.map((point) => point.x);
+  const ys = validPoints.map((point) => point.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX,
+    height: maxY - minY,
+    centerX: (minX + maxX) / 2,
+    centerY: (minY + maxY) / 2,
+    area: (maxX - minX) * (maxY - minY),
+  };
+};
+
+const getDistance = (pointA, pointB) => {
+  if (!isValidPoint(pointA) || !isValidPoint(pointB)) {
+    return 0;
+  }
+
+  return Math.hypot(pointA.x - pointB.x, pointA.y - pointB.y);
+};
+
+const getEyeAspectRatio = (landmarks, side) => {
+  const indexes =
+    side === "left"
+      ? { outer: 33, inner: 133, upperA: 159, upperB: 158, lowerA: 145, lowerB: 153 }
+      : { outer: 263, inner: 362, upperA: 386, upperB: 385, lowerA: 374, lowerB: 380 };
+
+  const width = getDistance(landmarks[indexes.outer], landmarks[indexes.inner]);
+
+  if (!width) {
+    return null;
+  }
+
+  const openA = getDistance(landmarks[indexes.upperA], landmarks[indexes.lowerA]);
+  const openB = getDistance(landmarks[indexes.upperB], landmarks[indexes.lowerB]);
+  return ((openA + openB) / 2) / width;
+};
+
+const getFallbackBlinkScore = (landmarks, side) => {
+  const ratio = getEyeAspectRatio(landmarks, side);
+
+  if (!Number.isFinite(ratio)) {
+    return null;
+  }
+
+  return clamp(1 - (ratio - 0.12) / 0.11, 0, 1);
+};
+
+const getFallbackMouthOpenScore = (landmarks) => {
+  const mouthWidth = getDistance(landmarks[61], landmarks[291]);
+  const mouthOpen = getDistance(landmarks[13], landmarks[14]);
+
+  if (!mouthWidth) {
+    return null;
+  }
+
+  return clamp((mouthOpen / mouthWidth - 0.06) / 0.34, 0, 1);
+};
+
+const getBlendshapeScore = (blendshape, names) => {
+  const categories = blendshape?.categories ?? [];
+
+  for (const name of names) {
+    const match = categories.find(
+      (category) => category.categoryName === name || category.displayName === name,
+    );
+
+    if (Number.isFinite(match?.score)) {
+      return match.score;
+    }
+  }
+
+  return null;
+};
+
+const getLivenessSignals = (landmarks, yawDegrees, blendshape) => {
+  const leftBlink =
+    getBlendshapeScore(blendshape, ["eyeBlinkLeft"]) ?? getFallbackBlinkScore(landmarks, "left") ?? 0;
+  const rightBlink =
+    getBlendshapeScore(blendshape, ["eyeBlinkRight"]) ?? getFallbackBlinkScore(landmarks, "right") ?? 0;
+  const blinkScore = Math.min(leftBlink, rightBlink);
+  const mouthOpen =
+    getBlendshapeScore(blendshape, ["jawOpen", "mouthOpen"]) ?? getFallbackMouthOpenScore(landmarks) ?? 0;
+
+  return {
+    yaw: Number.isFinite(yawDegrees) ? yawDegrees : 0,
+    blink: clamp(blinkScore, 0, 1),
+    mouthOpen: clamp(mouthOpen, 0, 1),
+  };
+};
+
+const assessFrameQuality = (faces, primaryIndex, landmarks, yawDegrees, requireNeutralPose = true) => {
+  if (!faces.length) {
+    return { ok: false, reason: "얼굴을 카메라 안에 맞춰주세요." };
+  }
+
+  if (faces.length > 1) {
+    return { ok: false, reason: "한 명만 화면에 들어오게 해주세요." };
+  }
+
+  if (primaryIndex < 0 || !landmarks) {
+    return { ok: false, reason: "얼굴 랜드마크를 안정적으로 찾고 있습니다." };
+  }
+
+  const bounds = getNormalizedBounds(landmarks);
+
+  if (!bounds) {
+    return { ok: false, reason: "얼굴 위치를 다시 확인하고 있습니다." };
+  }
+
+  if (bounds.area < 0.045) {
+    return { ok: false, reason: "카메라에 조금 더 가까이 와주세요." };
+  }
+
+  if (bounds.area > 0.48) {
+    return { ok: false, reason: "카메라에서 조금 떨어져 주세요." };
+  }
+
+  if (bounds.centerX < 0.3 || bounds.centerX > 0.7 || bounds.centerY < 0.25 || bounds.centerY > 0.78) {
+    return { ok: false, reason: "얼굴을 화면 중앙에 맞춰주세요." };
+  }
+
+  if (requireNeutralPose && Number.isFinite(yawDegrees) && Math.abs(yawDegrees) > 15) {
+    return { ok: false, reason: "정면을 보고 시작해주세요." };
+  }
+
+  return { ok: true, reason: "준비되었습니다." };
+};
+
+const getLivenessSample = (result, faces, yawMeasurements, requireNeutralPose = true) => {
+  const primaryIndex = getPrimaryFaceIndex(faces);
+  const landmarks = primaryIndex >= 0 ? faces[primaryIndex] : null;
+  const yaw = primaryIndex >= 0 ? yawMeasurements[primaryIndex] : null;
+  const quality = assessFrameQuality(faces, primaryIndex, landmarks, yaw, requireNeutralPose);
+  const blendshape = primaryIndex >= 0 ? result.faceBlendshapes?.[primaryIndex] : null;
+
+  return {
+    quality,
+    signals: landmarks ? getLivenessSignals(landmarks, yaw, blendshape) : null,
+  };
+};
+
+const getActionMatched = (step, signals) => {
+  if (!signals) {
+    return false;
+  }
+
+  if (step === "turnLeft") {
+    return signals.yaw <= -TURN_YAW_DEGREES;
+  }
+
+  if (step === "turnRight") {
+    return signals.yaw >= TURN_YAW_DEGREES;
+  }
+
+  if (step === "blink") {
+    return signals.blink >= BLINK_CLOSED_SCORE;
+  }
+
+  if (step === "mouthOpen") {
+    return signals.mouthOpen >= MOUTH_OPEN_SCORE;
+  }
+
+  return false;
+};
+
+const getNeutralMatched = (step, signals) => {
+  if (!signals) {
+    return false;
+  }
+
+  if (step === "turnLeft" || step === "turnRight") {
+    return Math.abs(signals.yaw) <= NEUTRAL_YAW_DEGREES;
+  }
+
+  if (step === "blink") {
+    return signals.blink <= BLINK_OPEN_SCORE;
+  }
+
+  if (step === "mouthOpen") {
+    return signals.mouthOpen <= MOUTH_CLOSED_SCORE;
+  }
+
+  return false;
+};
+
+const getHoldMs = (step) => {
+  if (step === "blink") {
+    return 80;
+  }
+
+  if (step === "mouthOpen") {
+    return 180;
+  }
+
+  return 160;
+};
+
+const failLiveness = (reason) => {
+  const progress = getLivenessProgress();
+  livenessState.state = "failed";
+  livenessState.message = reason;
+  livenessState.progress = progress;
+  setStatus("실패", "error");
+  renderLiveness();
+};
+
+const passLiveness = () => {
+  livenessState.state = "passed";
+  livenessState.stepIndex = livenessState.sequence.length;
+  livenessState.progress = 1;
+  livenessState.message = "랜덤 동작을 모두 확인했습니다.";
+  setStatus("통과", "success");
+  renderLiveness();
+};
+
+const advanceLivenessStep = (now) => {
+  livenessState.stepIndex += 1;
+  livenessState.stepPhase = "action";
+  livenessState.stepStartedAt = now;
+  livenessState.holdStartedAt = 0;
+
+  if (livenessState.stepIndex >= livenessState.sequence.length) {
+    passLiveness();
+    return;
+  }
+
+  const nextStep = getCurrentChallenge();
+  setLivenessMessage(CHALLENGE_LIBRARY[nextStep].actionText);
+  renderLiveness();
+};
+
+const beginChallenge = (now) => {
+  livenessState.state = "challenge";
+  livenessState.stepIndex = 0;
+  livenessState.stepPhase = "action";
+  livenessState.startedAt = now;
+  livenessState.stepStartedAt = now;
+  livenessState.holdStartedAt = 0;
+  livenessState.faceLostSince = 0;
+
+  const firstStep = getCurrentChallenge();
+  setStatus("동작", "active");
+  setLivenessMessage(CHALLENGE_LIBRARY[firstStep].actionText);
+  renderLiveness();
+};
+
+const updateStepHold = (matched, now, holdMs) => {
+  if (!matched) {
+    livenessState.holdStartedAt = 0;
+    return false;
+  }
+
+  if (!livenessState.holdStartedAt) {
+    livenessState.holdStartedAt = now;
+  }
+
+  return now - livenessState.holdStartedAt >= holdMs;
+};
+
+const updateChallengeStep = (sample, now) => {
+  const step = getCurrentChallenge();
+
+  if (!step) {
+    passLiveness();
+    return;
+  }
+
+  if (now - livenessState.startedAt > LIVENESS_SESSION_TIMEOUT_MS) {
+    failLiveness("제한 시간 안에 동작을 완료하지 못했습니다.");
+    return;
+  }
+
+  if (now - livenessState.stepStartedAt > LIVENESS_STEP_TIMEOUT_MS) {
+    failLiveness("현재 동작 시간이 초과되었습니다. 다시 시도해주세요.");
+    return;
+  }
+
+  if (livenessState.stepPhase === "action") {
+    setLivenessMessage(CHALLENGE_LIBRARY[step].actionText);
+
+    if (updateStepHold(getActionMatched(step, sample.signals), now, getHoldMs(step))) {
+      livenessState.stepPhase = "neutral";
+      livenessState.holdStartedAt = 0;
+      setLivenessMessage(CHALLENGE_LIBRARY[step].neutralText);
+    }
+  } else if (updateStepHold(getNeutralMatched(step, sample.signals), now, 160)) {
+    advanceLivenessStep(now);
+    return;
+  } else {
+    setLivenessMessage(CHALLENGE_LIBRARY[step].neutralText);
+  }
+
+  renderLiveness();
+};
+
+const updateLiveness = (result, faces, yawMeasurements, now) => {
+  if (!["quality", "challenge"].includes(livenessState.state)) {
+    return;
+  }
+
+  const sample = getLivenessSample(result, faces, yawMeasurements, livenessState.state === "quality");
+  livenessState.lastSignals = sample.signals;
+
+  if (!sample.quality.ok) {
+    if (livenessState.state === "challenge") {
+      if (!livenessState.faceLostSince) {
+        livenessState.faceLostSince = now;
+      }
+
+      if (now - livenessState.faceLostSince >= FACE_LOST_FAIL_MS) {
+        failLiveness(sample.quality.reason);
+        return;
+      }
+    } else {
+      livenessState.qualityStartedAt = 0;
+      livenessState.progress = 0;
+    }
+
+    setLivenessMessage(sample.quality.reason);
+    renderLiveness();
+    return;
+  }
+
+  livenessState.faceLostSince = 0;
+
+  if (livenessState.state === "quality") {
+    if (!livenessState.qualityStartedAt) {
+      livenessState.qualityStartedAt = now;
+    }
+
+    livenessState.progress = clamp((now - livenessState.qualityStartedAt) / QUALITY_HOLD_MS, 0, 1);
+    setLivenessMessage("정면 상태를 잠시 유지해주세요.");
+
+    if (livenessState.progress >= 1) {
+      beginChallenge(now);
+      return;
+    }
+
+    renderLiveness();
+    return;
+  }
+
+  updateChallengeStep(sample, now);
+};
+
 const getYawDirection = (degrees) => {
   if (!Number.isFinite(degrees)) {
     return "측정 불가";
@@ -552,6 +1081,7 @@ const detectLoop = () => {
 
       faceCount.textContent = String(faces.length);
       updateYawDisplay(faces, yawMeasurements);
+      updateLiveness(result, faces, yawMeasurements, now);
       drawFaces(faces, yawMeasurements);
       updateFps();
     } catch (error) {
@@ -586,8 +1116,8 @@ const start = async () => {
     resetMetrics();
     clearOverlay();
     video.dataset.ready = "true";
-    setStatus("추적", "active");
     setMessage("", false);
+    startLivenessCheck();
     updateToggle();
     detectLoop();
   } catch (error) {
@@ -619,8 +1149,18 @@ const stop = () => {
   resetMetrics();
   setStatus("대기", "idle");
   setMessage("전면 카메라를 준비합니다.");
+  resetLiveness();
   updateToggle();
 };
+
+retryLivenessButton.addEventListener("click", () => {
+  if (!isRunning) {
+    start();
+    return;
+  }
+
+  startLivenessCheck();
+});
 
 toggleButton.addEventListener("click", () => {
   if (isRunning) {
@@ -642,3 +1182,4 @@ window.addEventListener("pagehide", stop);
 setStatus("대기", "idle");
 updateToggle();
 clearOverlay();
+resetLiveness();

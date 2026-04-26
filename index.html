@@ -4,20 +4,20 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#080a0f" />
-    <title>Face Landmarker Mobile Sample</title>
+    <title>Face Liveness Mobile Sample</title>
     <link rel="stylesheet" href="./styles.css" />
     <script type="module" src="./app.js"></script>
   </head>
   <body>
     <main class="app-shell">
-      <section class="camera-stage" aria-label="전면 카메라 얼굴 랜드마크 뷰어">
+      <section class="camera-stage" aria-label="전면 카메라 얼굴 랜드마크 및 라이브니스 체크 뷰어">
         <video id="camera" class="camera-video" autoplay muted playsinline></video>
         <canvas id="overlay" class="camera-overlay"></canvas>
 
         <div class="top-bar">
           <div>
             <p class="eyebrow">Mobile Web</p>
-            <h1>Face Landmark</h1>
+            <h1>Face Liveness</h1>
           </div>
           <div id="statusBadge" class="status-badge" data-state="idle">대기</div>
         </div>
@@ -36,6 +36,20 @@
             <span class="metric-label">FPS</span>
             <strong id="fps">0</strong>
           </div>
+        </div>
+
+        <div id="livenessPanel" class="liveness-panel" data-state="idle" aria-live="polite" hidden>
+          <div class="liveness-header">
+            <span id="livenessLabel" class="liveness-label">Live Check</span>
+            <span id="livenessTimer" class="liveness-timer">--</span>
+          </div>
+          <strong id="livenessTitle">라이브니스 체크</strong>
+          <p id="livenessInstruction">카메라를 시작하세요.</p>
+          <div class="liveness-progress" aria-hidden="true">
+            <span id="livenessProgress"></span>
+          </div>
+          <div id="livenessSteps" class="liveness-steps" aria-label="라이브니스 체크 단계"></div>
+          <button id="retryLivenessButton" class="liveness-retry" type="button" hidden>다시 검사</button>
         </div>
 
         <div id="emptyState" class="empty-state">

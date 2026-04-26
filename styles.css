@@ -94,6 +94,7 @@ select {
 
 .top-bar,
 .metrics,
+.liveness-panel,
 .control-bar,
 .empty-state {
   position: absolute;
@@ -144,6 +145,11 @@ h1 {
 
 .status-badge[data-state="active"] {
   border-color: rgba(54, 211, 153, 0.44);
+  color: var(--accent);
+}
+
+.status-badge[data-state="success"] {
+  border-color: rgba(54, 211, 153, 0.56);
   color: var(--accent);
 }
 
@@ -200,6 +206,125 @@ h1 {
   font-weight: 800;
   line-height: 1;
   white-space: nowrap;
+}
+
+.liveness-panel {
+  left: 16px;
+  right: 16px;
+  bottom: calc(max(16px, env(safe-area-inset-bottom)) + 76px);
+  display: grid;
+  gap: 10px;
+  max-height: 36dvh;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease,
+    visibility 160ms ease;
+}
+
+.liveness-panel[hidden] {
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.liveness-panel[data-state="passed"] {
+  border-color: rgba(54, 211, 153, 0.48);
+}
+
+.liveness-panel[data-state="failed"] {
+  border-color: rgba(239, 68, 68, 0.48);
+}
+
+.liveness-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.liveness-label,
+.liveness-timer {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.liveness-panel strong {
+  display: block;
+  font-size: 1.08rem;
+  line-height: 1.15;
+}
+
+.liveness-panel p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 650;
+  line-height: 1.38;
+}
+
+.liveness-progress {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.liveness-progress span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), #7dd3fc);
+  transition: width 140ms ease;
+}
+
+.liveness-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.liveness-step {
+  min-height: 28px;
+  padding: 7px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 850;
+  line-height: 1.05;
+  text-align: center;
+}
+
+.liveness-step[data-state="active"] {
+  border-color: rgba(54, 211, 153, 0.52);
+  color: var(--text);
+  background: rgba(54, 211, 153, 0.12);
+}
+
+.liveness-step[data-state="done"] {
+  border-color: rgba(54, 211, 153, 0.4);
+  color: var(--accent);
+}
+
+.liveness-retry {
+  min-height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+  font-size: 0.86rem;
+  font-weight: 850;
+  cursor: pointer;
 }
 
 .empty-state {
@@ -370,6 +495,10 @@ h1 {
 @media (max-height: 620px) {
   .metrics {
     grid-template-columns: 1fr;
+  }
+
+  .liveness-panel {
+    max-height: 46dvh;
   }
 
   .lens-mark {
