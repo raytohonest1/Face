@@ -36,9 +36,13 @@ export class Gyroscope {
     if (typeof DeviceOrientationEvent.requestPermission === "function") {
       try {
         const result = await DeviceOrientationEvent.requestPermission();
-        if (result === "granted") attach();
+        if (result === "granted") {
+          attach();
+        } else {
+          onChange({ angle: null, isReady: false, status: "denied" });
+        }
       } catch {
-        // 사용자 제스처 없이 호출된 경우 무시
+        onChange({ angle: null, isReady: false, status: "denied" });
       }
       return;
     }

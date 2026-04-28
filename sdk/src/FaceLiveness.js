@@ -61,6 +61,7 @@ export class FaceLiveness {
   #running = false;
   #frameId = 0;
   #lastVideoTime = -1;
+  #pendingCapture = false;
 
   constructor(rawOptions) {
     this.#opts = parseOptions(rawOptions);
@@ -71,12 +72,19 @@ export class FaceLiveness {
     });
     this.#liveness = new LivenessChecker(
       this.#opts.liveness,
-      this.#opts.onLivenessChange,
+      (event) => {
+        this.#opts.onLivenessChange(event);
+        // 라이브니스가 실제로 실행된 경우에만 자동 캡처 예약
+        if (event.phase === "passed" && this.#opts.liveness.enabled) {
+          this.#pendingCapture = true;
+        }
+      },
     );
     this.#gyroscope = new Gyroscope(this.#opts.gyroscope);
   }
 
   async start() {
+    if (this.#running) return;
     try {
       await this.#camera.start();
       await this.#detector.load();
@@ -97,7 +105,12 @@ export class FaceLiveness {
     this.#gyroscope.dispose();
   }
 
+  // 라이브니스 비활성화 시 또는 수동 촬영 트리거
   capture() {
+    this.#doCapture();
+  }
+
+  #doCapture() {
     const image = captureFrame(this.#opts.video, this.#detector.lastLandmarks);
     this.#opts.onCapture({
       image,
@@ -118,10 +131,19 @@ export class FaceLiveness {
         const { result, faces, yawMeasurements, primaryIndex } = detection;
         const landmarks = primaryIndex >= 0 ? faces[primaryIndex] : null;
         const yaw = primaryIndex >= 0 ? yawMeasurements[primaryIndex] : null;
-        const faceOk = assessQuality(faces, primaryIndex, landmarks, yaw);
+        // 자이로스코프 준비 상태를 얼굴 품질 조건에 포함
+        const gyroReady = this.#gyroscope.isReady;
+        const faceOk = gyroReady && assessQuality(faces, primaryIndex, landmarks, yaw);
         const blendshape = primaryIndex >= 0 ? result.faceBlendshapes?.[primaryIndex] : null;
         const signals = landmarks ? getLivenessSignals(landmarks, yaw, blendshape) : null;
-        if (signals) this.#liveness.update(signals, faceOk, now);
+        // 얼굴 없는 경우에도 항상 호출해 faceLostSince 타이머 진행
+        this.#liveness.update(signals, faceOk, now);
+
+        // 라이브니스 통과 직후 다음 프레임에서 자동 캡처
+        if (this.#pendingCapture && this.#detector.lastLandmarks) {
+          this.#pendingCapture = false;
+          this.#doCapture();
+        }
       }
     }
 
