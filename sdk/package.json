@@ -3,10 +3,11 @@
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/face-liveness.umd.js",
-  "module": "./dist/face-liveness.esm.js",
+  "module": "./dist/face-liveness.es.js",
+  "files": ["dist"],
   "exports": {
     ".": {
-      "import": "./dist/face-liveness.esm.js",
+      "import": "./dist/face-liveness.es.js",
       "require": "./dist/face-liveness.umd.js"
     }
   },

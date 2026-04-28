@@ -9,7 +9,12 @@ export default defineConfig({
       formats: ["es", "umd"],
     },
     rollupOptions: {
-      external: [],
+      external: ["@mediapipe/tasks-vision"],
+      output: {
+        globals: {
+          "@mediapipe/tasks-vision": "TasksVision",
+        },
+      },
     },
   },
   test: {
