@@ -167,7 +167,7 @@ h1 {
   top: calc(max(16px, env(safe-area-inset-top)) + 76px);
   right: 16px;
   display: grid;
-  grid-template-columns: repeat(3, minmax(54px, 1fr));
+  grid-template-columns: repeat(2, minmax(54px, 1fr));
   gap: 8px;
 }
 

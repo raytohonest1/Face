@@ -93,6 +93,8 @@ const livenessInstruction = document.querySelector("#livenessInstruction");
 const livenessProgress = document.querySelector("#livenessProgress");
 const livenessSteps = document.querySelector("#livenessSteps");
 const retryLivenessButton = document.querySelector("#retryLivenessButton");
+const gyroTilt = document.querySelector("#gyroTilt");
+const gyroStatus = document.querySelector("#gyroStatus");
 
 const createLivenessState = () => ({
   state: "idle",
@@ -108,6 +110,8 @@ const createLivenessState = () => ({
   message: "카메라를 시작하세요.",
   lastSignals: null,
 });
+
+let gyroListenerAttached = false;
 
 let landmarker = null;
 let stream = null;
@@ -260,6 +264,57 @@ const resetMetrics = () => {
 };
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+const updateGyroDisplay = (beta) => {
+  if (!Number.isFinite(beta)) {
+    gyroTilt.textContent = "--";
+    gyroStatus.textContent = "미지원";
+    return;
+  }
+
+  // beta: 0° = 평평(눕혀짐), 90° = 세워짐
+  const tilt = Math.round(Math.abs(beta));
+  gyroTilt.textContent = `${tilt}°`;
+  gyroStatus.textContent = tilt >= 45 ? "세워짐" : "눕혀짐";
+};
+
+const attachGyroListener = () => {
+  if (gyroListenerAttached) {
+    return;
+  }
+
+  window.addEventListener("deviceorientation", (event) => {
+    updateGyroDisplay(event.beta);
+  });
+
+  gyroListenerAttached = true;
+};
+
+const initGyroscope = async () => {
+  if (!window.DeviceOrientationEvent) {
+    return;
+  }
+
+  // iOS 13+: 권한 요청 필요
+  if (typeof DeviceOrientationEvent.requestPermission === "function") {
+    try {
+      const result = await DeviceOrientationEvent.requestPermission();
+
+      if (result === "granted") {
+        attachGyroListener();
+      } else {
+        gyroTilt.textContent = "--";
+        gyroStatus.textContent = "권한거부";
+      }
+    } catch {
+      // 사용자 제스처 없이 호출된 경우 무시
+    }
+
+    return;
+  }
+
+  attachGyroListener();
+};
 
 const ensureSecureContext = () => {
   if (!window.isSecureContext) {
@@ -1117,6 +1172,7 @@ const start = async () => {
     clearOverlay();
     video.dataset.ready = "true";
     setMessage("", false);
+    await initGyroscope();
     startLivenessCheck();
     updateToggle();
     detectLoop();
