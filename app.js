@@ -18,6 +18,11 @@ const MOUTH_CLOSED_SCORE = 0.24;
 const SHAKE_WINDOW_MS = 850;
 const SHAKE_STABLE_LEVEL = 32;
 const SHAKE_WARN_LEVEL = 58;
+const FACE_PROFILE_STORAGE_KEY = "face-liveness-demo-profile-v1";
+const FACE_PROFILE_VERSION = 1;
+const MATCH_PASS_SCORE = 72;
+const MATCH_REVIEW_SCORE = 55;
+const MATCH_FULL_DISTANCE = 0.22;
 
 const CHALLENGE_LIBRARY = {
   turnLeft: {
@@ -75,12 +80,17 @@ const MESH_LINES = [
   MOUTH_INNER,
 ];
 const STABLE_POINTS = [1, 4, 33, 133, 152, 263, 362];
+const FACE_DESCRIPTOR_POINTS = [
+  10, 152, 234, 454, 127, 356, 33, 133, 362, 263, 1, 4, 6, 168, 195, 61, 291,
+  0, 17,
+];
 
 const video = document.querySelector("#camera");
 const canvas = document.querySelector("#overlay");
 const ctx = canvas.getContext("2d");
 const toggleButton = document.querySelector("#toggleButton");
 const toggleLabel = document.querySelector("#toggleLabel");
+const enrollButton = document.querySelector("#enrollButton");
 const statusBadge = document.querySelector("#statusBadge");
 const message = document.querySelector("#message");
 const emptyState = document.querySelector("#emptyState");
@@ -88,6 +98,8 @@ const faceCount = document.querySelector("#faceCount");
 const yawAngle = document.querySelector("#yawAngle");
 const yawDirection = document.querySelector("#yawDirection");
 const fps = document.querySelector("#fps");
+const matchScore = document.querySelector("#matchScore");
+const matchStatus = document.querySelector("#matchStatus");
 const shakeLevel = document.querySelector("#shakeLevel");
 const shakeStatus = document.querySelector("#shakeStatus");
 const livenessPanel = document.querySelector("#livenessPanel");
@@ -126,9 +138,12 @@ let lastVideoTime = -1;
 let frameCounter = 0;
 let fpsStartedAt = performance.now();
 let isRunning = false;
+let isBusy = false;
 let smoothedYawDegrees = null;
 let shakeSamples = [];
 let smoothedShakeLevel = null;
+let enrolledProfile = null;
+let latestFaceFrame = null;
 let livenessState = createLivenessState();
 
 const setStatus = (text, state = "idle") => {
@@ -137,7 +152,9 @@ const setStatus = (text, state = "idle") => {
 };
 
 const setBusy = (busy) => {
+  isBusy = busy;
   toggleButton.disabled = busy;
+  updateEnrollButton();
 };
 
 const setMessage = (text, visible = true) => {
@@ -265,6 +282,9 @@ const resetMetrics = () => {
   yawAngle.textContent = "--";
   yawDirection.textContent = "측정 대기";
   smoothedYawDegrees = null;
+  matchScore.textContent = "--";
+  matchStatus.textContent = enrolledProfile ? "등록됨" : "등록 없음";
+  latestFaceFrame = null;
   shakeLevel.textContent = "--";
   shakeStatus.textContent = "측정 대기";
   shakeSamples = [];
@@ -272,6 +292,7 @@ const resetMetrics = () => {
   fps.textContent = "0";
   frameCounter = 0;
   fpsStartedAt = performance.now();
+  updateEnrollButton();
 };
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
@@ -681,6 +702,108 @@ const getShakeSnapshot = (landmarks, now) => {
   return {
     level: smoothedShakeLevel,
     stable: smoothedShakeLevel < SHAKE_WARN_LEVEL,
+  };
+};
+
+const getDescriptorAverage = (landmarks, indexes, aspectRatio) => {
+  const points = indexes
+    .map((index) => landmarks[index])
+    .filter(isValidPoint)
+    .map((point) => ({
+      x: point.x * aspectRatio,
+      y: point.y,
+    }));
+
+  if (!points.length) {
+    return null;
+  }
+
+  return {
+    x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+    y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
+  };
+};
+
+const createFaceDescriptor = (landmarks) => {
+  if (!landmarks) {
+    return null;
+  }
+
+  const aspectRatio = (video.videoWidth || 1) / (video.videoHeight || 1);
+  const leftEye = getDescriptorAverage(landmarks, [33, 133], aspectRatio);
+  const rightEye = getDescriptorAverage(landmarks, [362, 263], aspectRatio);
+
+  if (!leftEye || !rightEye) {
+    return null;
+  }
+
+  const eyeDx = rightEye.x - leftEye.x;
+  const eyeDy = rightEye.y - leftEye.y;
+  const eyeDistance = Math.hypot(eyeDx, eyeDy);
+
+  if (eyeDistance < 0.02) {
+    return null;
+  }
+
+  const centerX = (leftEye.x + rightEye.x) / 2;
+  const centerY = (leftEye.y + rightEye.y) / 2;
+  const cos = eyeDx / eyeDistance;
+  const sin = eyeDy / eyeDistance;
+  const descriptor = [];
+
+  for (const index of FACE_DESCRIPTOR_POINTS) {
+    const landmark = landmarks[index];
+
+    if (!isValidPoint(landmark)) {
+      return null;
+    }
+
+    const x = landmark.x * aspectRatio - centerX;
+    const y = landmark.y - centerY;
+    descriptor.push((x * cos + y * sin) / eyeDistance);
+    descriptor.push((-x * sin + y * cos) / eyeDistance);
+  }
+
+  return descriptor;
+};
+
+const getDescriptorDistance = (descriptorA, descriptorB) => {
+  if (!Array.isArray(descriptorA) || !Array.isArray(descriptorB)) {
+    return null;
+  }
+
+  if (descriptorA.length !== descriptorB.length || !descriptorA.length) {
+    return null;
+  }
+
+  const variance = descriptorA.reduce((sum, value, index) => {
+    const nextValue = descriptorB[index];
+
+    if (!Number.isFinite(value) || !Number.isFinite(nextValue)) {
+      return Number.NaN;
+    }
+
+    const delta = value - nextValue;
+    return sum + delta * delta;
+  }, 0);
+
+  if (!Number.isFinite(variance)) {
+    return null;
+  }
+
+  return Math.sqrt(variance / descriptorA.length);
+};
+
+const getMatchScore = (descriptor, profile) => {
+  const distance = getDescriptorDistance(descriptor, profile?.descriptor);
+
+  if (!Number.isFinite(distance)) {
+    return null;
+  }
+
+  return {
+    distance,
+    score: clamp(100 * (1 - distance / MATCH_FULL_DISTANCE), 0, 100),
   };
 };
 
@@ -1103,6 +1226,125 @@ const updateShakeDisplay = (landmarks, now) => {
   return snapshot;
 };
 
+const loadFaceProfile = () => {
+  try {
+    const stored = window.localStorage.getItem(FACE_PROFILE_STORAGE_KEY);
+
+    if (!stored) {
+      enrolledProfile = null;
+      return;
+    }
+
+    const profile = JSON.parse(stored);
+    const descriptor = profile?.descriptor;
+
+    if (
+      profile?.version !== FACE_PROFILE_VERSION ||
+      !Array.isArray(descriptor) ||
+      descriptor.length !== FACE_DESCRIPTOR_POINTS.length * 2 ||
+      descriptor.some((value) => !Number.isFinite(value))
+    ) {
+      enrolledProfile = null;
+      window.localStorage.removeItem(FACE_PROFILE_STORAGE_KEY);
+      return;
+    }
+
+    enrolledProfile = profile;
+  } catch {
+    enrolledProfile = null;
+  }
+};
+
+const saveFaceProfile = (descriptor) => {
+  const profile = {
+    version: FACE_PROFILE_VERSION,
+    enrolledAt: new Date().toISOString(),
+    descriptor: descriptor.map((value) => Number(value.toFixed(5))),
+  };
+
+  enrolledProfile = profile;
+
+  try {
+    window.localStorage.setItem(FACE_PROFILE_STORAGE_KEY, JSON.stringify(profile));
+    return true;
+  } catch {
+    matchStatus.textContent = "저장 실패";
+    return false;
+  }
+};
+
+const getMatchStatus = (score) => {
+  if (score >= MATCH_PASS_SCORE) {
+    return "일치";
+  }
+
+  if (score >= MATCH_REVIEW_SCORE) {
+    return "확인";
+  }
+
+  return "불일치";
+};
+
+const updateFaceMatchDisplay = (descriptor, quality) => {
+  if (!enrolledProfile) {
+    matchScore.textContent = "--";
+    matchStatus.textContent = "등록 없음";
+    return;
+  }
+
+  if (!descriptor) {
+    matchScore.textContent = "--";
+    matchStatus.textContent = isRunning ? "얼굴 없음" : "등록됨";
+    return;
+  }
+
+  if (quality && !quality.ok) {
+    matchScore.textContent = "--";
+    matchStatus.textContent = "정렬 필요";
+    return;
+  }
+
+  const match = getMatchScore(descriptor, enrolledProfile);
+
+  if (!match) {
+    matchScore.textContent = "--";
+    matchStatus.textContent = "비교 불가";
+    return;
+  }
+
+  matchScore.textContent = `${Math.round(match.score)}%`;
+  matchStatus.textContent = getMatchStatus(match.score);
+};
+
+const updateEnrollButton = () => {
+  enrollButton.textContent = enrolledProfile ? "다시 등록" : "얼굴 등록";
+  enrollButton.disabled = Boolean(
+    isBusy ||
+      !isRunning ||
+      !latestFaceFrame?.descriptor ||
+      !latestFaceFrame?.quality?.ok ||
+      !latestFaceFrame?.shakeReady,
+  );
+};
+
+const enrollCurrentFace = () => {
+  if (!latestFaceFrame?.descriptor || !latestFaceFrame?.quality?.ok || !latestFaceFrame?.shakeReady) {
+    matchScore.textContent = "--";
+    matchStatus.textContent = !latestFaceFrame?.descriptor
+      ? "얼굴 없음"
+      : latestFaceFrame?.shakeReady
+        ? "정렬 필요"
+        : "측정 중";
+    updateEnrollButton();
+    return;
+  }
+
+  const saved = saveFaceProfile(latestFaceFrame.descriptor);
+  matchScore.textContent = "100%";
+  matchStatus.textContent = saved ? "등록됨" : "임시 등록";
+  updateEnrollButton();
+};
+
 const updateYawDisplay = (faces, yawMeasurements) => {
   const primaryIndex = getPrimaryFaceIndex(faces);
   const nextYaw = primaryIndex >= 0 ? yawMeasurements[primaryIndex] : null;
@@ -1290,10 +1532,28 @@ const detectLoop = () => {
 
       const primaryIndex = getPrimaryFaceIndex(faces);
       const primaryLandmarks = primaryIndex >= 0 ? faces[primaryIndex] : null;
+      const primaryYaw = primaryIndex >= 0 ? yawMeasurements[primaryIndex] : null;
       const shakeSnapshot = updateShakeDisplay(primaryLandmarks, now);
+      const currentQuality = assessFrameQuality(
+        faces,
+        primaryIndex,
+        primaryLandmarks,
+        primaryYaw,
+        true,
+        shakeSnapshot,
+      );
+      const currentDescriptor = createFaceDescriptor(primaryLandmarks);
+      latestFaceFrame = {
+        descriptor: currentDescriptor,
+        quality: currentQuality,
+        shakeReady: Number.isFinite(shakeSnapshot.level),
+        updatedAt: now,
+      };
 
       faceCount.textContent = String(faces.length);
       updateYawDisplay(faces, yawMeasurements);
+      updateFaceMatchDisplay(currentDescriptor, currentQuality);
+      updateEnrollButton();
       updateLiveness(result, faces, yawMeasurements, shakeSnapshot, now);
       drawFaces(faces, yawMeasurements);
       updateFps();
@@ -1376,6 +1636,8 @@ retryLivenessButton.addEventListener("click", () => {
   startLivenessCheck();
 });
 
+enrollButton.addEventListener("click", enrollCurrentFace);
+
 toggleButton.addEventListener("click", () => {
   if (isRunning) {
     stop();
@@ -1393,6 +1655,8 @@ window.addEventListener("resize", () => {
 
 window.addEventListener("pagehide", stop);
 
+loadFaceProfile();
+resetMetrics();
 setStatus("대기", "idle");
 updateToggle();
 clearOverlay();

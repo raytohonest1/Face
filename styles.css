@@ -396,33 +396,51 @@ h1 {
   right: 16px;
   bottom: max(16px, env(safe-area-inset-bottom));
   display: flex;
+  gap: 8px;
   justify-content: center;
 }
 
-.primary-button {
+.primary-button,
+.secondary-button {
   display: inline-flex;
-  width: min(100%, 420px);
+  min-width: 0;
   min-height: 54px;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  border: 1px solid rgba(54, 211, 153, 0.56);
   border-radius: 8px;
-  background: linear-gradient(180deg, var(--accent), var(--accent-strong));
-  color: #06110c;
   font-size: 1rem;
   font-weight: 900;
   letter-spacing: 0;
-  box-shadow: 0 16px 42px rgba(21, 183, 121, 0.26);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
 
-.primary-button:active {
+.primary-button {
+  flex: 1 1 58%;
+  max-width: 300px;
+  border: 1px solid rgba(54, 211, 153, 0.56);
+  background: linear-gradient(180deg, var(--accent), var(--accent-strong));
+  color: #06110c;
+  box-shadow: 0 16px 42px rgba(21, 183, 121, 0.26);
+}
+
+.secondary-button {
+  flex: 0 1 132px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: var(--surface-strong);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(16px);
+}
+
+.primary-button:active,
+.secondary-button:active {
   transform: translateY(1px);
 }
 
-.primary-button:disabled {
+.primary-button:disabled,
+.secondary-button:disabled {
   border-color: rgba(255, 255, 255, 0.16);
   background: rgba(255, 255, 255, 0.14);
   color: rgba(255, 255, 255, 0.6);
@@ -495,7 +513,7 @@ h1 {
 @media (max-height: 620px) {
   .metrics {
     left: 16px;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 
   .metrics > div {
