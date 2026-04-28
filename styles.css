@@ -494,7 +494,13 @@ h1 {
 
 @media (max-height: 620px) {
   .metrics {
-    grid-template-columns: 1fr;
+    left: 16px;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .metrics > div {
+    min-width: 0;
+    padding: 8px 6px;
   }
 
   .liveness-panel {

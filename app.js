@@ -15,6 +15,9 @@ const BLINK_CLOSED_SCORE = 0.48;
 const BLINK_OPEN_SCORE = 0.26;
 const MOUTH_OPEN_SCORE = 0.45;
 const MOUTH_CLOSED_SCORE = 0.24;
+const SHAKE_WINDOW_MS = 850;
+const SHAKE_STABLE_LEVEL = 32;
+const SHAKE_WARN_LEVEL = 58;
 
 const CHALLENGE_LIBRARY = {
   turnLeft: {
@@ -85,6 +88,8 @@ const faceCount = document.querySelector("#faceCount");
 const yawAngle = document.querySelector("#yawAngle");
 const yawDirection = document.querySelector("#yawDirection");
 const fps = document.querySelector("#fps");
+const shakeLevel = document.querySelector("#shakeLevel");
+const shakeStatus = document.querySelector("#shakeStatus");
 const livenessPanel = document.querySelector("#livenessPanel");
 const livenessLabel = document.querySelector("#livenessLabel");
 const livenessTimer = document.querySelector("#livenessTimer");
@@ -122,6 +127,8 @@ let frameCounter = 0;
 let fpsStartedAt = performance.now();
 let isRunning = false;
 let smoothedYawDegrees = null;
+let shakeSamples = [];
+let smoothedShakeLevel = null;
 let livenessState = createLivenessState();
 
 const setStatus = (text, state = "idle") => {
@@ -258,6 +265,10 @@ const resetMetrics = () => {
   yawAngle.textContent = "--";
   yawDirection.textContent = "측정 대기";
   smoothedYawDegrees = null;
+  shakeLevel.textContent = "--";
+  shakeStatus.textContent = "측정 대기";
+  shakeSamples = [];
+  smoothedShakeLevel = null;
   fps.textContent = "0";
   frameCounter = 0;
   fpsStartedAt = performance.now();
@@ -594,6 +605,85 @@ const getNormalizedBounds = (landmarks) => {
   };
 };
 
+const resetShakeTracking = () => {
+  shakeSamples = [];
+  smoothedShakeLevel = null;
+};
+
+const getShakeAnchor = (landmarks) => {
+  const bounds = getNormalizedBounds(landmarks);
+
+  if (!bounds) {
+    return null;
+  }
+
+  const stableCenter = getPointAverage(landmarks, STABLE_POINTS);
+  const faceSize = Math.max(bounds.width, bounds.height);
+
+  if (!Number.isFinite(faceSize) || faceSize <= 0) {
+    return null;
+  }
+
+  return {
+    x: stableCenter?.x ?? bounds.centerX,
+    y: stableCenter?.y ?? bounds.centerY,
+    size: faceSize,
+  };
+};
+
+const getShakeSnapshot = (landmarks, now) => {
+  const anchor = landmarks ? getShakeAnchor(landmarks) : null;
+
+  if (!anchor) {
+    resetShakeTracking();
+    return { level: null, stable: false };
+  }
+
+  shakeSamples.push({ ...anchor, time: now });
+  shakeSamples = shakeSamples.filter((sample) => now - sample.time <= SHAKE_WINDOW_MS);
+
+  if (shakeSamples.length < 3) {
+    return { level: null, stable: false };
+  }
+
+  const average = shakeSamples.reduce(
+    (sum, sample) => ({
+      x: sum.x + sample.x,
+      y: sum.y + sample.y,
+      size: sum.size + sample.size,
+    }),
+    { x: 0, y: 0, size: 0 },
+  );
+  average.x /= shakeSamples.length;
+  average.y /= shakeSamples.length;
+  average.size /= shakeSamples.length;
+
+  const variance = shakeSamples.reduce(
+    (sum, sample) => {
+      const centerDelta = Math.hypot(sample.x - average.x, sample.y - average.y);
+      const sizeDelta = sample.size - average.size;
+
+      return {
+        center: sum.center + centerDelta * centerDelta,
+        size: sum.size + sizeDelta * sizeDelta,
+      };
+    },
+    { center: 0, size: 0 },
+  );
+  const faceScale = Math.max(average.size, 0.001);
+  const centerRms = Math.sqrt(variance.center / shakeSamples.length) / faceScale;
+  const sizeRms = Math.sqrt(variance.size / shakeSamples.length) / faceScale;
+  const rawLevel = clamp(centerRms * 720 + sizeRms * 360, 0, 100);
+
+  smoothedShakeLevel =
+    smoothedShakeLevel === null ? rawLevel : smoothedShakeLevel * 0.68 + rawLevel * 0.32;
+
+  return {
+    level: smoothedShakeLevel,
+    stable: smoothedShakeLevel < SHAKE_WARN_LEVEL,
+  };
+};
+
 const getDistance = (pointA, pointB) => {
   if (!isValidPoint(pointA) || !isValidPoint(pointB)) {
     return 0;
@@ -672,7 +762,14 @@ const getLivenessSignals = (landmarks, yawDegrees, blendshape) => {
   };
 };
 
-const assessFrameQuality = (faces, primaryIndex, landmarks, yawDegrees, requireNeutralPose = true) => {
+const assessFrameQuality = (
+  faces,
+  primaryIndex,
+  landmarks,
+  yawDegrees,
+  requireNeutralPose = true,
+  shakeSnapshot = null,
+) => {
   if (!faces.length) {
     return { ok: false, reason: "얼굴을 카메라 안에 맞춰주세요." };
   }
@@ -707,14 +804,35 @@ const assessFrameQuality = (faces, primaryIndex, landmarks, yawDegrees, requireN
     return { ok: false, reason: "정면을 보고 시작해주세요." };
   }
 
+  if (
+    requireNeutralPose &&
+    Number.isFinite(shakeSnapshot?.level) &&
+    !shakeSnapshot.stable
+  ) {
+    return { ok: false, reason: "카메라와 얼굴을 잠시 고정해주세요." };
+  }
+
   return { ok: true, reason: "준비되었습니다." };
 };
 
-const getLivenessSample = (result, faces, yawMeasurements, requireNeutralPose = true) => {
+const getLivenessSample = (
+  result,
+  faces,
+  yawMeasurements,
+  requireNeutralPose = true,
+  shakeSnapshot = null,
+) => {
   const primaryIndex = getPrimaryFaceIndex(faces);
   const landmarks = primaryIndex >= 0 ? faces[primaryIndex] : null;
   const yaw = primaryIndex >= 0 ? yawMeasurements[primaryIndex] : null;
-  const quality = assessFrameQuality(faces, primaryIndex, landmarks, yaw, requireNeutralPose);
+  const quality = assessFrameQuality(
+    faces,
+    primaryIndex,
+    landmarks,
+    yaw,
+    requireNeutralPose,
+    shakeSnapshot,
+  );
   const blendshape = primaryIndex >= 0 ? result.faceBlendshapes?.[primaryIndex] : null;
 
   return {
@@ -877,12 +995,18 @@ const updateChallengeStep = (sample, now) => {
   renderLiveness();
 };
 
-const updateLiveness = (result, faces, yawMeasurements, now) => {
+const updateLiveness = (result, faces, yawMeasurements, shakeSnapshot, now) => {
   if (!["quality", "challenge"].includes(livenessState.state)) {
     return;
   }
 
-  const sample = getLivenessSample(result, faces, yawMeasurements, livenessState.state === "quality");
+  const sample = getLivenessSample(
+    result,
+    faces,
+    yawMeasurements,
+    livenessState.state === "quality",
+    shakeSnapshot,
+  );
   livenessState.lastSignals = sample.signals;
 
   if (!sample.quality.ok) {
@@ -947,6 +1071,36 @@ const formatYawLabel = (degrees) => {
   }
 
   return `${getYawDirection(degrees)} ${formatYawValue(degrees)}`;
+};
+
+const getShakeStatus = (level) => {
+  if (!Number.isFinite(level)) {
+    return "측정 중";
+  }
+
+  if (level < SHAKE_STABLE_LEVEL) {
+    return "안정";
+  }
+
+  if (level < SHAKE_WARN_LEVEL) {
+    return "약간";
+  }
+
+  return "흔들림";
+};
+
+const updateShakeDisplay = (landmarks, now) => {
+  const snapshot = getShakeSnapshot(landmarks, now);
+
+  if (!Number.isFinite(snapshot.level)) {
+    shakeLevel.textContent = "--";
+    shakeStatus.textContent = landmarks ? "측정 중" : "얼굴 없음";
+    return snapshot;
+  }
+
+  shakeLevel.textContent = `${Math.round(snapshot.level)}%`;
+  shakeStatus.textContent = getShakeStatus(snapshot.level);
+  return snapshot;
 };
 
 const updateYawDisplay = (faces, yawMeasurements) => {
@@ -1134,9 +1288,13 @@ const detectLoop = () => {
       lastVideoTime = video.currentTime;
       lastDetectionAt = now;
 
+      const primaryIndex = getPrimaryFaceIndex(faces);
+      const primaryLandmarks = primaryIndex >= 0 ? faces[primaryIndex] : null;
+      const shakeSnapshot = updateShakeDisplay(primaryLandmarks, now);
+
       faceCount.textContent = String(faces.length);
       updateYawDisplay(faces, yawMeasurements);
-      updateLiveness(result, faces, yawMeasurements, now);
+      updateLiveness(result, faces, yawMeasurements, shakeSnapshot, now);
       drawFaces(faces, yawMeasurements);
       updateFps();
     } catch (error) {
